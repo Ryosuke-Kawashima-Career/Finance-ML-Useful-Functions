@@ -113,3 +113,62 @@ def visualize_performance():
     plt.savefig(plot_path)
     print(f"Saved signal visualization to: {plot_path}")
     plt.show()
+
+def signal_plot(sample_df: pd.DataFrame, signal_df: pd.DataFrame, annualized_vola_df: pd.DataFrame, symbol: str, start_date: str, end_date: str):
+    signal_symbol_df = signal_df.loc[(slice(None), symbol), :].copy()
+
+    # Calculate target position size from signal
+    d = 0.35
+    signal_symbol_df['target_position_size'] = signal_symbol_df['signal'].apply(
+        lambda m: 0.0 if pd.isna(m) else math.floor(m / d) * 0.5 if m >= 0 else math.ceil(m / d) * 0.5  # if NaN, set to 0.0
+    )
+
+    # extract data
+    date_filtered_df = signal_symbol_df.loc[(slice(start_date, end_date), slice(None)), :]
+
+    # Calculate bet size and calculate each time as latest_timestamp
+    bet_sizes = []
+    signals = []
+    target_positions = []
+    volas = []
+    timestamps = []
+
+    for latest_timestamp in date_filtered_df.index.get_level_values(0).unique():
+
+        latest_bar = sample_df.loc[(latest_timestamp, symbol), :]
+
+        # Calculate annualized volatility
+        relevant_vola_df = annualized_vola_df.xs(symbol, level='symbol')
+        relevant_vola = relevant_vola_df[relevant_vola_df.index <= latest_timestamp].iloc[-1]['volatility']
+        annualized_vola = relevant_vola / latest_bar['close']
+
+        # Calculate signal, target position size, and bet size
+        signal = date_filtered_df.loc[(latest_timestamp, symbol), 'signal']
+        target_position_size = date_filtered_df.loc[(latest_timestamp, symbol), 'target_position_size']
+        bet_size = (target_position_size * 0.5) / annualized_vola
+
+        signals.append(signal)
+        target_positions.append(target_position_size)
+        bet_sizes.append(bet_size)
+        volas.append(annualized_vola)
+        timestamps.append(latest_timestamp)
+
+    # plot
+    plt.figure(figsize=(14, 8))
+    plt.plot(timestamps, signals, label='Signal', linestyle=':')
+    plt.plot(timestamps, target_positions, label='Target Position Size', linestyle='--')
+    plt.plot(timestamps, bet_sizes, label='Position Size')
+    plt.plot(timestamps, volas, label='Annualized Volatility', linestyle='-.')
+
+    # Customize y-axis ticks
+    """
+    yticks = np.arange(-2.0, 2.0, 1.0)
+    yticks = np.append(yticks, [-0.7, -0.35, 0.35, 0.7])
+    yticks = np.sort(yticks)
+    plt.yticks([-0.7, -0.35, 0.35, 0.7])
+    """
+    plt.xlabel('Date')
+    plt.ylabel('Value')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
