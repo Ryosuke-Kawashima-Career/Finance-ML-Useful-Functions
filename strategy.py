@@ -384,3 +384,130 @@ class MinimumStrategy(BaseStrategy):
                     )
                 )
         return order_lst
+
+class BuyAndHoldStrategy(BaseStrategy):
+    def __init__(self, cfg) -> None:
+        super().__init__(cfg)
+        self.symbol = "BTCUSDT"
+
+    def preprocess(self, df):
+        """
+        Do nothing
+        """
+        return df
+
+    def get_signal(self, preprocessed_df: pd.DataFrame, models: list):
+        """
+        No preprocessing
+        """
+        return preprocessed_df
+
+    def get_orders(self, latest_timestamp, latest_bar, latest_signal, asset_info):
+        """
+        Generate orders at the latest_timestamp.
+
+        Parameters
+        ==========
+        latest_timestamp : pandas.Timestamp
+            Current time (latest_timestamp).
+        latest_bar : pandas.DataFrame
+            Recent OHLCV (multi index of symbol and time).
+        latest_signal : pandas.DataFrame
+            Recent signal corresponding to latest_bar (symbol x time).
+        asset_info : AssetInfo
+            Asset information (position, margin, etc.).
+
+        Returns
+        =======
+        list[Order]
+            List of orders for latest_timestamp.
+        """
+        order_lst = []
+
+        latest_bar_symbol = latest_bar.loc[(slice(None), self.symbol), :].iloc[0]
+
+        current_position = asset_info.signed_pos_sizes[self.symbol]
+
+        # Calculate the position size corresponding to the specified amount
+        target_position = (
+            self.cfg["strategy_config"]["sizing"]["target_size"]
+            / latest_bar_symbol["close"]
+        )
+
+        # Only place orders if the current position is zero
+        if current_position == 0:
+            order_lst.append(
+                Order(
+                    type="MARKET",
+                    side="BUY",
+                    size=target_position,
+                    price=None,
+                    symbol=self.symbol,
+                )
+            )
+
+        return order_lst
+
+class KellyStrategy(BaseStrategy):
+    def __init__(self, cfg) -> None:
+        super().__init__(cfg)
+        self.symbol = "BTCUSDT"
+
+    def preprocess(self, df):
+        """
+        Passthrough
+        """
+        return df
+
+    def get_signal(self, preprocessed_df: pd.DataFrame, models: list):
+        """
+        Passthrough
+        """
+        return preprocessed_df
+
+    def get_orders(self, latest_timestamp, latest_bar, latest_signal, asset_info):
+        """
+        Parameters
+        ==========
+        latest_timestamp : pandas.Timestamp
+            Current time (latest_timestamp).
+        latest_bar : pandas.DataFrame
+            Recent OHLCV (multi index of symbol and time).
+        latest_signal : pandas.DataFrame
+            Recent signal corresponding to latest_bar (symbol x time).
+        asset_info : AssetInfo
+            Asset information (position, margin, etc.).
+
+        Returns
+        =======
+        list[Order]
+            List of orders for latest_timestamp.
+        """
+
+
+        order_lst = []
+
+        latest_bar_symbol = latest_bar.loc[(slice(None), self.symbol), :].iloc[0]
+
+        current_position = asset_info.signed_pos_sizes[self.symbol]
+        target_position = (
+            self.cfg["strategy_config"]["sizing"]["target_size"]
+            / latest_bar_symbol["close"]
+        )
+
+        # Calculate the difference between the target position and the current position
+        position_diff = target_position - current_position
+
+        # Place an order to close the position difference if it exceeds the minimum trading unit
+        if abs(position_diff) >= self.cfg["exchange_config"][self.symbol]["min_lot"]:
+            order_lst.append(
+                Order(
+                    type="MARKET",
+                    side="BUY" if position_diff > 0 else "SELL",
+                    size=abs(position_diff),
+                    price=None,
+                    symbol=self.symbol,
+                )
+            )
+
+        return order_lst
