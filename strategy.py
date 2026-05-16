@@ -511,3 +511,292 @@ class KellyStrategy(BaseStrategy):
             )
 
         return order_lst
+
+class VolatilityTargetingStrategy(BaseStrategy):
+    def __init__(self, cfg) -> None:
+        super().__init__(cfg)
+        self.symbol = "BTCUSDT"
+
+    def preprocess(self, df):
+        """
+        Preprocess the input data.
+        """
+        df_symbol = df.loc[(slice(None), self.symbol), :].copy()
+
+        # Calculate annualized volatility
+        df.loc[(slice(None), self.symbol), "annualized_volatility"] = df_symbol[
+            "close"
+        ].pct_change().rolling(
+            self.cfg["strategy_config"]["volatility"]["window"]
+        ).std() * np.sqrt(self.cfg["strategy_config"]["volatility"]["annualizer"])
+
+        return df
+
+    def get_signal(self, preprocessed_df: pd.DataFrame, models: list):
+        """
+        Get the signal from the preprocessed data.
+        """
+        return preprocessed_df
+
+    def get_orders(self, latest_timestamp, latest_bar, latest_signal, asset_info):
+        """
+        Generate orders at the latest_timestamp.
+
+        Parameters
+        ==========
+        latest_timestamp : pandas.Timestamp
+            Current time (latest_timestamp).
+        latest_bar : pandas.DataFrame
+            Recent OHLCV (multi index of symbol and time).
+        latest_signal : pandas.DataFrame
+            Recent signal corresponding to latest_bar (symbol x time).
+        asset_info : AssetInfo
+            Asset information (position, margin, etc.).
+
+        Returns
+        =======
+        list[Order]
+            List of orders for latest_timestamp.
+        """
+        order_lst = []
+
+        latest_bar_symbol = latest_bar.loc[(slice(None), self.symbol), :].iloc[0]
+        latest_signal_symbol = latest_signal.loc[(slice(None), self.symbol), :].iloc[0]
+
+        current_position = asset_info.signed_pos_sizes[self.symbol]
+
+        # Volatility ratio for keeping constant risk amount
+        volatility_ratio = (
+            self.cfg["strategy_config"]["volatility"]["target_risk"]
+            / latest_signal_symbol["annualized_volatility"]
+        )
+
+        # Target position size that maintains constant risk amount
+        target_position = (
+            self.cfg["strategy_config"]["sizing"]["target_size"]
+            / latest_bar_symbol["close"]
+            * volatility_ratio
+        )
+
+        # Difference between target position and current position
+        position_diff = target_position - current_position
+
+        if abs(position_diff) >= self.cfg["exchange_config"][self.symbol]["min_lot"]:
+            order_lst.append(
+                Order(
+                    type="MARKET",
+                    side="BUY" if position_diff > 0 else "SELL",
+                    size=abs(position_diff),
+                    price=None,
+                    symbol=self.symbol,
+                )
+            )
+
+        return order_lst
+
+class RiskParityStrategy(BaseStrategy):
+    def __init__(self, cfg) -> None:
+        super().__init__(cfg)
+        self.symbols = cfg["backtester_config"]["symbol"]
+
+    def preprocess(self, df):
+        """
+        Preprocess the input data.
+        """
+        # Multiple symbols
+        for symbol in self.symbols:
+            df_symbol = df.loc[(slice(None), symbol), :].copy()
+            df.loc[(slice(None), symbol), "annualized_volatility"] = df_symbol[
+                "close"
+            ].pct_change().rolling(
+                self.cfg["strategy_config"]["volatility"]["window"]
+            ).std() * np.sqrt(self.cfg["strategy_config"]["volatility"]["annualizer"])
+
+        return df
+
+    def get_signal(self, preprocessed_df: pd.DataFrame, models: list):
+        """
+        Get the signal from the preprocessed data.
+        """
+        return preprocessed_df
+
+    def get_orders(self, latest_timestamp, latest_bar, latest_signal, asset_info):
+        """
+        Generate orders at the latest_timestamp.
+
+        Parameters
+        ==========
+        latest_timestamp : pandas.Timestamp
+            Current time (latest_timestamp).
+        latest_bar : pandas.DataFrame
+            Recent OHLCV (multi index of symbol and time).
+        latest_signal : pandas.DataFrame
+            Recent signal corresponding to latest_bar (symbol x time).
+        asset_info : AssetInfo
+            Asset information (position, margin, etc.).
+
+        Returns
+        =======
+        list[Order]
+            List of orders for latest_timestamp.
+        """
+        order_lst = []
+        # Risk Parity
+        target_risk_per_symbol = self.cfg["strategy_config"]["volatility"][
+            "target_risk"
+        ] / len(self.symbols)
+
+        # Expand to multiple stocks
+        for symbol in self.symbols:
+            latest_bar_symbol = latest_bar.loc[(slice(None), symbol), :].iloc[0]
+            latest_signal_symbol = latest_signal.loc[(slice(None), symbol), :].iloc[0]
+
+            current_position = asset_info.signed_pos_sizes[symbol]
+            volatility_ratio = (
+                target_risk_per_symbol / latest_signal_symbol["annualized_volatility"]
+            )
+            target_position = (
+                self.cfg["strategy_config"]["sizing"]["target_size"]
+                / latest_bar_symbol["close"]
+                * volatility_ratio
+            )
+            position_diff = target_position - current_position
+
+            if abs(position_diff) >= self.cfg["exchange_config"][symbol]["min_lot"]:
+                order_lst.append(
+                    Order(
+                        type="MARKET",
+                        side="BUY" if position_diff > 0 else "SELL",
+                        size=abs(position_diff),
+                        price=None,
+                        symbol=symbol,
+                    )
+                )
+
+        return order_lst
+
+class TrendFollowingStrategy(BaseStrategy):
+    def __init__(self, cfg) -> None:
+        super().__init__(cfg)
+        self.symbols = cfg["backtester_config"]["symbol"]
+
+    def preprocess(self, df):
+        """
+        Preprocessing OHLCV data for trend following strategy.
+        """
+        for symbol in self.symbols:
+            df_symbol = df.loc[(slice(None), symbol), :].copy()
+            df.loc[(slice(None), symbol), "annualized_volatility"] = df_symbol[
+                "close"
+            ].pct_change().rolling(
+                self.cfg["strategy_config"]["volatility"]["window"]
+            ).std() * np.sqrt(self.cfg["strategy_config"]["volatility"]["annualizer"])
+
+            # Calculate short moving average
+            sma_short = (
+                df_symbol["close"]
+                .rolling(self.cfg["strategy_config"]["trend_follow"]["window"])
+                .mean()
+            )
+
+            # Calculate long moving average
+            sma_long = (
+                df_symbol["close"]
+                .rolling(self.cfg["strategy_config"]["trend_follow"]["window"] * 4)
+                .mean()
+            )
+
+            # Price-dimensional volatility 
+            price_volatility = (
+                df_symbol["close"]
+                .diff()
+                .rolling(self.cfg["strategy_config"]["volatility"]["window"])
+                .std()
+            )
+
+            # Calculate raw signal
+            raw_signal = (sma_short - sma_long) / price_volatility
+
+            # Calculate rolling min-max scaled signal
+            rolling_max = raw_signal.rolling(
+                self.cfg["strategy_config"]["trend_follow"]["scaling_window"]
+            ).max()
+            rolling_min = raw_signal.rolling(
+                self.cfg["strategy_config"]["trend_follow"]["scaling_window"]
+            ).min()
+            scaled_signal = (raw_signal - rolling_min) / (rolling_max - rolling_min)
+
+            # Convert the signal range from 0~1 to -1~1
+            scaled_signal = scaled_signal * 2 - 1
+
+            df.loc[(slice(None), symbol), "signal"] = scaled_signal
+
+        return df
+
+    def get_signal(self, preprocessed_df: pd.DataFrame, models: list):
+        """
+        Get the signal from the preprocessed_df 
+        """
+        return preprocessed_df
+
+    def get_orders(self, latest_timestamp, latest_bar, latest_signal, asset_info):
+        """
+        Generate orders at the latest_timestamp.
+
+        Parameters
+        ==========
+        latest_timestamp : pandas.Timestamp
+            Current time (latest_timestamp).
+        latest_bar : pandas.DataFrame
+            Recent OHLCV (multi index of symbol and time).
+        latest_signal : pandas.DataFrame
+            Recent signal corresponding to latest_bar (symbol x time).
+        asset_info : AssetInfo
+            Asset information (position, margin, etc.).
+
+        Returns
+        =======
+        list[Order]
+            List of orders for latest_timestamp.
+        """
+
+
+        order_lst = []
+
+        target_risk_per_symbol = self.cfg["strategy_config"]["volatility"][
+            "target_risk"
+        ] / len(self.symbols)
+
+        for symbol in self.symbols:
+            latest_bar_symbol = latest_bar.loc[(slice(None), symbol), :].iloc[0]
+            latest_signal_symbol = latest_signal.loc[(slice(None), symbol), :].iloc[0]
+
+            current_position = asset_info.signed_pos_sizes[symbol]
+
+            volatility_ratio = (
+                target_risk_per_symbol / latest_signal_symbol["annualized_volatility"]
+            )
+
+            # Calculate target position based on the magnitude and sign of the signal
+            target_position = (
+                self.cfg["strategy_config"]["sizing"]["target_size"]
+                / latest_bar_symbol["close"]
+                * volatility_ratio
+                * latest_signal_symbol["signal"]
+            )
+
+            position_diff = target_position - current_position
+
+            if abs(position_diff) >= self.cfg["exchange_config"][symbol]["min_lot"]:
+                order_lst.append(
+                    Order(
+                        type="MARKET",
+                        side="BUY" if position_diff > 0 else "SELL",
+                        size=abs(position_diff),
+                        price=None,
+                        symbol=symbol,
+                    )
+                )
+
+        return order_lst
+
