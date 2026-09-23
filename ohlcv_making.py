@@ -3,6 +3,7 @@ This script processes tick/execution financial data into OHLCV time bars
 and visualizes price movements and returns.
 """
 
+from sklearn.linear_model import LinearRegression
 from pathlib import Path
 import warnings
 
@@ -117,6 +118,101 @@ def visualize_bar(bar_data: pd.DataFrame, title: str = "BTC/USD 15-Minute Time B
     plt.tight_layout()
     plt.show()
 
+def preprocess_log(bar_data: pd.DataFrame) -> pd.DataFrame:
+    """Preprocess bar data to compute log returns and add to the DataFrame."""
+    target_cols = ["op", "hi", "lo", "cl"]
+    for col in target_cols:
+        log_col = f"log_{col}"
+        diff_log_col = f"diff_log_{col}"
+        bar_data[log_col] = np.log(bar_data[col])
+        bar_data[diff_log_col] = bar_data[log_col].diff(1)
+    
+    # Remove the first row with NaN values
+    bar_data = bar_data.dropna()
+    
+    return bar_data
+
+def time_series_train_test_split(data: pd.DataFrame, train_size: float = 0.8) -> pd.DataFrame:
+    """Split data into training and testing sets."""
+    length = len(data)
+    split_index = int(length * train_size)
+    targets = ["diff_log_op","diff_log_hi","diff_log_lo","diff_log_cl"]
+    features = [col for col in data.columns if col not in targets]
+    X_train = data[features].iloc[: split_index]
+    X_test = data[features].iloc[split_index:]
+    y_train = data[targets].iloc[: split_index]
+    y_test = data[targets].iloc[split_index:]
+    return X_train, X_test, y_train, y_test
+
+def eval_direction_accuracy(target: np.ndarray, pred: np.ndarray) -> float:
+    """Evaluate direction accuracy."""
+    from sklearn.metrics import accuracy_score
+    target_direction = np.sign(target)
+    pred_direction = np.sign(pred)
+    accuracy = accuracy_score(target_direction, pred_direction)
+    return accuracy
+
+def adf_test(series, sig_level = 0.05) -> bool:
+    from statsmodels.tsa.stattools import adfuller
+    """
+    This function conducts Augmented Dickey-Fuller test to check stationarity.
+    H0: Data is non-stationary vs H1: Data is stationary.
+    If p value is smaller than sig_level, we reject H0 and conclude that the data is stationary.
+    """
+    result = adfuller(series, autolag='AIC')
+    p_value = result[1]
+    if p_value <= sig_level:
+        print(f"p-value: {p_value:.4f} <= {sig_level}. Reject H0, data is stationary.")
+        return True
+    else:
+        print(f"p-value: {p_value:.4f} > {sig_level}. Do not reject H0, data is non-stationary.")
+        return False
+
+def linear_regression(X, y) -> float:
+    """
+    Simple Linear Regression := y = A1x1 + A2x2 + ... + Akxk + b
+    Returns an accuracy score.
+    """
+    X_train, y_train, X_test, y_test = time_series_train_test_split(X, y)
+    lr = LinearRegression()
+    lr.fit(X_train, y_train)
+    y_pred = lr.predict(X_test)
+    plt.figure(figsize=(12, 6))
+    plt.plot(y_test, label="Actual")
+    plt.plot(y_pred, label="Predicted")
+    plt.legend()
+    plt.show()
+    accuracy = eval_direction_accuracy(y_test, y_pred)
+    print(f"Linear Regression Accuracy: {accuracy:.4f}")
+    return accuracy
+
+def random_forest_regression(X, y):
+    """
+    Random Forest Regression := 
+    """
+    pass
+
+from torch import nn
+
+class LSTMRegressor(nn.Module):
+    pass
+
+from torch.utils.data import Dataset
+class TimeBarDataset(Dataset):
+    pass
+
+def lstm_bar_data(X, y):
+    pass
+
+from torch.utils.data import DataLoader
+
+class Trainer:
+    def __init__():
+        pass
+    def train():
+        pass
+    def predict():
+        pass
 
 def main() -> None:
     """Main execution entry point: loads data, creates time bars, and visualizes."""
@@ -140,6 +236,9 @@ def main() -> None:
 
     # 2. Visualize the bar data
     visualize_bar(bar_data, title="BTC/USD Time Bar (2022-03-01)")
+
+    # Log Return Series
+    log_return = preprocess_log(bar_data)
 
 
 if __name__ == "__main__":
