@@ -3,6 +3,7 @@ This script processes tick/execution financial data into OHLCV time bars
 and visualizes price movements and returns.
 """
 
+from week2.Day02 import input_size
 from sklearn.linear_model import LinearRegression
 from pathlib import Path
 import warnings
@@ -188,14 +189,38 @@ def linear_regression(X, y) -> float:
 
 def random_forest_regression(X, y):
     """
-    Random Forest Regression := 
+    Random Forest Regression
     """
-    pass
+    from sklearn.ensemble import RandomForestRegressor
+    X_train, y_train, X_test, y_test = time_series_train_test_split(X, y)
+    rfr = RandomForestRegressor()
+    rfr.fit(X_train, y_train)
+    y_pred = rfr.predict(X_test)
+    plt.figure(figsize=(12, 6))
+    plt.plot(y_test, label="Actual")
+    plt.plot(y_pred, label="Predicted")
+    plt.legend()
+    plt.show()
+    accuracy = eval_direction_accuracy(y_test, y_pred)
+    print(f"Random Forest Regression Accuracy: {accuracy:.4f}")
+    return accuracy
 
 from torch import nn
 
 class LSTMRegressor(nn.Module):
-    pass
+    def __init__(self, dim_in: int, dim_hidden: int, dim_out: int, batch_size: int):
+        super(LSTMRegressor, self).__init__()
+        self.lstm = nn.LSTM(
+            input_size=dim_in, hidden_size=dim_hidden, batch_first=True
+        )
+        self.output_layer = nn.Linear(dim_hidden, dim_out)
+    def forward(self, inputs):
+        ## [Batch, Sequence, Input_features]
+        h, _ = self.lstm(inputs)
+        ## [Batch, Hidden_features]
+        output = self.output_layer(h[:, -1, :])
+        ## [Batch, Output_features]
+        return output
 
 from torch.utils.data import Dataset
 class TimeBarDataset(Dataset):
