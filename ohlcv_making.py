@@ -232,12 +232,56 @@ def lstm_bar_data(X, y):
 from torch.utils.data import DataLoader
 
 class Trainer:
-    def __init__():
-        pass
-    def train():
-        pass
-    def predict():
-        pass
+    def __init__(self, batch_size, learning_rate, num_epochs, model, criterion, optimizer, evaluator):
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.num_epochs = num_epochs
+        self.model = model
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.evaluator = evaluator
+        self.train_loader = DataLoader(dataset=self.train_dataset, batch_size=self.batch_size, shuffle=True)
+        self.eval_loader = DataLoader(dataset=self.eval_dataset, batch_size=self.batch_size, shuffle=False)
+        
+    def train(self):
+        losses_train = []
+        losses_eval = []
+        for epoch in range(self.num_epochs):
+            loss_train = self.run_epoch("train", epoch)
+            loss_eval = self.run_epoch("eval", epoch)
+            losses_train.append(loss_train)
+            losses_eval.append(loss_eval)
+        self.visualize_losses(losses_train, losses_eval)
+        return losses_train, losses_eval
+
+    def run_epoch(self, mode: str, epoch: int) -> float:
+        if mode == "train":
+            loader = self.train_loader
+        else:
+            loader = self.eval_loader
+        
+        with torch.set_grad_enabled(mode == "train"):
+            total_loss = 0
+            total_eval = []
+            for batch_idx in range(len(loader) // self.batch_size + 1):
+                inputs, targets = loader[batch_idx*self.batch_size: (batch_idx+1)*self.batch_size]
+                self.optimizer.zero_grad()
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, targets)
+                total_loss += loss.item()
+                if mode == "train":
+                    loss.backward()
+                    self.optimizer.step()
+                if mode == "eval":
+                    self.evaluator.add_batch(targets, outputs)
+        return total_loss / len(loader)
+
+    def visualize_losses(self, losses_train: list[float], losses_eval: list[float]) -> None:
+        plt.figure(figsize=(12, 6))
+        plt.plot(losses_train, label="Train Loss")
+        plt.plot(losses_eval, label="Eval Loss")
+        plt.legend()
+        plt.show()
 
 def main() -> None:
     """Main execution entry point: loads data, creates time bars, and visualizes."""
